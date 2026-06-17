@@ -25,6 +25,7 @@
 
 (require 'magit-section)
 (require 'json)
+(require 'bookmark)
 (require 'cl-lib)
 (require 'seq)
 
@@ -54,6 +55,13 @@
 `path'   -- by file path, then name."
   :type '(choice (const :tag "By name then path" name)
                  (const :tag "By path then name" path))
+  :group 'ctags)
+
+(defcustom ctags-program "ctags"
+  "Path to the Universal Ctags executable.
+Note: Emacs' own `etags' (sometimes installed as `ctags') does NOT
+support JSON output.  You need Universal Ctags for this mode."
+  :type 'file
   :group 'ctags)
 
 
@@ -92,8 +100,14 @@
 
 ;;; Internals
 
-(defvar ctags--source-dir nil
-  "Directory of the ctags JSON file, used for resolving relative paths.")
+(defvar-local ctags--source-dir nil
+  "Directory used for resolving relative paths in tags.
+For file-backed buffers this is the directory of the JSON file.
+For directory-backed buffers this is the directory ctags ran on.")
+
+(defvar-local ctags--tags-dir nil
+  "Directory that ctags was run on, or nil if reading from a JSON file.
+Non-nil for buffers created by `ctags-run'.")
 
 (defun ctags--parse-buffer ()
   "Parse the current buffer as newline-delimited JSON (NDJSON).
@@ -230,13 +244,13 @@ sorted by path."
         (entries (ctags--parse-buffer))
         (pos     (point)))
     (erase-buffer)
-    (if (null entries)
-        (insert "(empty or unparseable TAGS.json)\n")
-      (let* ((groups      (ctags--group-by-kind entries))
-             (sorted      (ctags--sort-groups groups))
-             (total-kinds (length sorted)))
-        (ctags--insert-summary (length entries) total-kinds)
-        (magit-insert-section (ctags-root)
+    (magit-insert-section (ctags-root)
+      (if (null entries)
+          (insert "(no tags found)\n")
+        (let* ((groups      (ctags--group-by-kind entries))
+               (sorted      (ctags--sort-groups groups))
+               (total-kinds (length sorted)))
+          (ctags--insert-summary (length entries) total-kinds)
           (dolist (group sorted)
             (let ((kind    (car group))
                   (entries (ctags--sort-entries (cdr group))))
@@ -291,16 +305,38 @@ Patterns have the form /^...$/ or /...$/."
         (when (string-match "\\`/\\(.*\\)/\\'" pattern)
           (regexp-quote (match-string 1 pattern)))))))
 
+(defun ctags--ctags-supports-json ()
+  "Return non-nil if `ctags-program' supports --output-format=json."
+  (with-temp-buffer
+    (and (zerop (call-process ctags-program nil t nil
+                              "--output-format=json" "--version"))
+         t)))
+
 (defun ctags-refresh ()
-  "Refresh the ctags buffer by re-reading the file."
+  "Refresh the ctags buffer.
+For directory-backed buffers (created by `ctags-run'), re-runs ctags.
+For file-backed buffers, re-reads the JSON file."
   (interactive)
-  (if (not buffer-file-name)
-      (message "ctags-mode: no file associated with this buffer")
+  (cond
+   (ctags--tags-dir
+    (let ((inhibit-read-only t)
+          (dir ctags--tags-dir))
+      (erase-buffer)
+      (let ((default-directory dir)
+            (exit-code (call-process ctags-program nil t nil
+                                     "-R" "--output-format=json" "-f" "-")))
+        (unless (zerop exit-code)
+          (message "ctags exited with code %d" exit-code)))
+      (ctags--refresh-buffer)
+      (message "Refreshed ctags in %s" (abbreviate-file-name dir))))
+   (buffer-file-name
     (let ((inhibit-read-only t))
       (erase-buffer)
       (insert-file-contents buffer-file-name)
       (ctags--refresh-buffer)
-      (message "Refreshed ctags buffer"))))
+      (message "Refreshed ctags buffer")))
+   (t
+    (message "ctags-mode: nothing to refresh"))))
 
 ;;;###autoload
 (defun ctags-open (file)
@@ -312,6 +348,71 @@ not automatically opened in `ctags-mode'."
   (unless (eq major-mode 'ctags-mode)
     (ctags-mode)))
 
+;;;###autoload
+(defun ctags--check-ctags ()
+  "Check that `ctags-program' is Universal Ctags.  Signal an error if not."
+  (unless (ctags--ctags-supports-json)
+    (user-error
+     (concat "%s does not support --output-format=json."
+             "  You need Universal Ctags, not Emacs etags."
+             "  Set `ctags-program' to the correct binary.")
+     ctags-program)))
+
+(defun ctags-run (dir)
+  "Run `ctags -R --output-format=json' on DIR and browse the result.
+Creates a buffer named `*ctags: <dir>*' in `ctags-mode'.  The
+buffer is directory-backed: refreshing it re-runs ctags on the
+directory.  You can bookmark this buffer with `\\[bookmark-set]'.
+
+If a buffer for DIR already exists, it is refreshed and reused."
+  (interactive
+   (list (read-directory-name "Ctags directory: "
+                               default-directory nil t)))
+  (ctags--check-ctags)
+  (let* ((dir (expand-file-name dir))
+         (bufname (format "*ctags: %s*" (abbreviate-file-name dir)))
+         (existing (get-buffer bufname))
+         (buf (get-buffer-create bufname)))
+    ;; Populate the buffer with ctags output FIRST, then enable the mode.
+    (with-current-buffer buf
+      (setq-local default-directory dir)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (let ((exit-code (call-process ctags-program nil t nil
+                                       "-R" "--output-format=json" "-f" "-")))
+          (unless (zerop exit-code)
+            (message "Warning: ctags exited with code %d" exit-code))))
+      (if (eq major-mode 'ctags-mode)
+          ;; Buffer already had ctags-mode; just re-render from the new
+          ;; content (which is already in the buffer).
+          (ctags--refresh-buffer)
+        ;; Fresh buffer: enable ctags-mode, which calls ctags--refresh-buffer.
+        (ctags-mode))
+      (setq-local ctags--tags-dir dir)
+      (setq-local ctags--source-dir dir)
+      (setq-local bookmark-make-record-function #'ctags--bookmark-make-record)
+      (goto-char (point-min)))
+    (pop-to-buffer buf)
+    (if existing
+        (message "Refreshed ctags in %s" (abbreviate-file-name dir))
+      (message "Ctags in %s (%d kinds)"
+               (abbreviate-file-name dir)
+               (length (oref magit-root-section children))))))
+
+(defun ctags--bookmark-make-record ()
+  "Return a bookmark record for the current ctags buffer.
+Only supported for directory-backed buffers (see `ctags--tags-dir')."
+  (when ctags--tags-dir
+    `(,(format "ctags: %s" (abbreviate-file-name ctags--tags-dir))
+      (directory . ,ctags--tags-dir)
+      (handler  . ctags--bookmark-handler)
+      (defaults . ,(list (format "ctags: %s"
+                                 (abbreviate-file-name ctags--tags-dir)))))))
+
+(defun ctags--bookmark-handler (record)
+  "Restore a ctags bookmark from RECORD by re-running ctags."
+  (ctags-run (bookmark-prop-get record 'directory)))
+
 
 ;;; Major mode
 
@@ -322,11 +423,17 @@ not automatically opened in `ctags-mode'."
 Tags are grouped by kind (func, struct, variable, …) in
 collapsible sections.  Use the following keys:
 
-\\{ctags-mode-map}"
+\\{ctags-mode-map}
+
+Two usage modes:
+- File-backed: open a JSON file produced by ctags.
+- Directory-backed: `\\[ctags-run]' runs ctags on a directory and
+  shows the result.  The buffer is bookmarkable."
   :group 'ctags
   (setq-local ctags--source-dir
               (file-name-directory
                (or buffer-file-name default-directory)))
+  (setq-local ctags--tags-dir nil)
   (ctags--refresh-buffer)
   (goto-char (point-min)))
 
