@@ -358,6 +358,7 @@ not automatically opened in `ctags-mode'."
              "  Set `ctags-program' to the correct binary.")
      ctags-program)))
 
+;;;###autoload
 (defun ctags-run (dir)
   "Run `ctags -R --output-format=json' on DIR and browse the result.
 Creates a buffer named `*ctags: <dir>*' in `ctags-mode'.  The
@@ -398,6 +399,12 @@ If a buffer for DIR already exists, it is refreshed and reused."
       (message "Ctags in %s (%d kinds)"
                (abbreviate-file-name dir)
                (length (oref magit-root-section children))))))
+
+;;;###autoload
+(defun ctags-run-here ()
+  "Run `ctags-run' on `default-directory' without prompting."
+  (interactive)
+  (ctags-run default-directory))
 
 (defun ctags--bookmark-make-record ()
   "Return a bookmark record for the current ctags buffer.
