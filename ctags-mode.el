@@ -238,11 +238,12 @@ sorted by path."
                    total-tags total-kinds)
            'font-lock-face 'magit-section-heading)))
 
-(defun ctags--refresh-buffer ()
-  "Refresh the contents of the current ctags-mode buffer."
+(defun ctags--refresh-buffer (&optional old-ident)
+  "Refresh the contents of the current ctags-mode buffer.
+If OLD-IDENT is given (from `magit-section-ident'), try to restore
+point to the matching section in the new tree."
   (let ((inhibit-read-only t)
-        (entries (ctags--parse-buffer))
-        (pos     (point)))
+        (entries (ctags--parse-buffer)))
     (erase-buffer)
     (magit-insert-section (ctags-root)
       (if (null entries)
@@ -255,7 +256,9 @@ sorted by path."
             (let ((kind    (car group))
                   (entries (ctags--sort-entries (cdr group))))
               (ctags--insert-kind-section kind entries))))))
-    (goto-char pos)))
+    (if-let ((new-section (and old-ident (magit-get-section old-ident))))
+        (goto-char (oref new-section start))
+      (goto-char (point-min)))))
 
 
 ;;; Commands
@@ -317,26 +320,28 @@ Patterns have the form /^...$/ or /...$/."
 For directory-backed buffers (created by `ctags-run'), re-runs ctags.
 For file-backed buffers, re-reads the JSON file."
   (interactive)
-  (cond
-   (ctags--tags-dir
-    (let ((inhibit-read-only t)
-          (dir ctags--tags-dir))
-      (erase-buffer)
-      (let ((default-directory dir)
-            (exit-code (call-process ctags-program nil t nil
-                                     "-R" "--output-format=json" "-f" "-")))
-        (unless (zerop exit-code)
-          (message "ctags exited with code %d" exit-code)))
-      (ctags--refresh-buffer)
-      (message "Refreshed ctags in %s" (abbreviate-file-name dir))))
-   (buffer-file-name
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (insert-file-contents buffer-file-name)
-      (ctags--refresh-buffer)
-      (message "Refreshed ctags buffer")))
-   (t
-    (message "ctags-mode: nothing to refresh"))))
+  (let ((old-ident (and (magit-current-section)
+                        (magit-section-ident (magit-current-section)))))
+    (cond
+     (ctags--tags-dir
+      (let ((inhibit-read-only t)
+            (dir ctags--tags-dir))
+        (erase-buffer)
+        (let ((default-directory dir)
+              (exit-code (call-process ctags-program nil t nil
+                                       "-R" "--output-format=json" "-f" "-")))
+          (unless (zerop exit-code)
+            (message "ctags exited with code %d" exit-code)))
+        (ctags--refresh-buffer old-ident)
+        (message "Refreshed ctags in %s" (abbreviate-file-name dir))))
+     (buffer-file-name
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert-file-contents buffer-file-name)
+        (ctags--refresh-buffer old-ident)
+        (message "Refreshed ctags buffer")))
+     (t
+      (message "ctags-mode: nothing to refresh")))))
 
 ;;;###autoload
 (defun ctags-open (file)
@@ -406,6 +411,12 @@ If a buffer for DIR already exists, it is refreshed and reused."
   (interactive)
   (ctags-run default-directory))
 
+(defun ctags--revert-buffer (&rest _ignored)
+  "`revert-buffer-function' for ctags-mode buffers.
+Handles both file-backed and directory-backed buffers by delegating
+ to `ctags-refresh'."
+  (ctags-refresh))
+
 (defun ctags--bookmark-make-record ()
   "Return a bookmark record for the current ctags buffer.
 Only supported for directory-backed buffers (see `ctags--tags-dir')."
@@ -441,6 +452,7 @@ Two usage modes:
               (file-name-directory
                (or buffer-file-name default-directory)))
   (setq-local ctags--tags-dir nil)
+  (setq-local revert-buffer-function #'ctags--revert-buffer)
   (ctags--refresh-buffer)
   (goto-char (point-min)))
 
