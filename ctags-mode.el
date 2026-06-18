@@ -1,10 +1,10 @@
 ;;; ctags-mode.el --- Browse ctags JSON output in a collapsible tree -*- lexical-binding: t -*-
 
-;; Author: deepseek
+;; Author: Daniel Nagy
 ;; Version: 0.1.0
 ;; Keywords: tools, ctags
-;; Package-Requires: ((emacs "29.1") (magit-section "3.0"))
-;; URL: https://github.com/deepseek/ctags-mode
+;; Package-Requires: ((emacs "30.1") (magit-section "3.0"))
+;; URL: https://github.com/nagy/emacs-ctags-mode
 
 ;;; Commentary:
 

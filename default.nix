@@ -20,6 +20,6 @@ melpaBuild {
 
   meta = {
     description = "Browse Universal Ctags JSON output in a collapsible magit-section tree";
-    license = lib.licenses.gpl3Plus;
+    license = lib.licenses.agpl3Plus;
   };
 }
