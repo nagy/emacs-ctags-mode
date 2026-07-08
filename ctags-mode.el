@@ -59,6 +59,7 @@
 
 (defcustom ctags-program "ctags"
   "Path to the Universal Ctags executable.
+See URL `https://github.com/universal-ctags'.
 Note: Emacs' own `etags' (sometimes installed as `ctags') does NOT
 support JSON output.  You need Universal Ctags for this mode."
   :type 'file
@@ -373,7 +374,7 @@ directory.  You can bookmark this buffer with `\\[bookmark-set]'.
 If a buffer for DIR already exists, it is refreshed and reused."
   (interactive
    (list (read-directory-name "Ctags directory: "
-                               default-directory nil t)))
+                              default-directory nil t)))
   (ctags--check-ctags)
   (let* ((dir (expand-file-name dir))
          (bufname (format "*ctags: %s*" (abbreviate-file-name dir)))
