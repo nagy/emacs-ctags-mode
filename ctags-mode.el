@@ -257,7 +257,7 @@ point to the matching section in the new tree."
             (let ((kind    (car group))
                   (entries (ctags--sort-entries (cdr group))))
               (ctags--insert-kind-section kind entries))))))
-    (if-let ((new-section (and old-ident (magit-get-section old-ident))))
+    (if-let* ((new-section (and old-ident (magit-get-section old-ident))))
         (goto-char (oref new-section start))
       (goto-char (point-min)))))
 

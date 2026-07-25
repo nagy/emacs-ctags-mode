@@ -21,6 +21,8 @@ melpaBuild {
       --replace-fail 'ctags-program "ctags"' 'ctags-program "${lib.getExe universal-ctags}"'
   '';
 
+  turnCompilationWarningToError = true;
+
   meta = {
     description = "Browse Universal Ctags JSON output in a collapsible magit-section tree";
     longDescription = ''
