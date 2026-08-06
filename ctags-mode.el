@@ -449,6 +449,10 @@ Two usage modes:
 - Directory-backed: `\\[ctags-run]' runs ctags on a directory and
   shows the result.  The buffer is bookmarkable."
   :group 'ctags
+  (setq-local
+   ;; Plain positions instead of markers: markers make section insertion
+   ;; quadratic on trees with many files (e.g. nixpkgs).
+   magit-section-inhibit-markers t)
   (setq-local ctags--source-dir
               (file-name-directory
                (or buffer-file-name default-directory)))

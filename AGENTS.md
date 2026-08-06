@@ -129,6 +129,14 @@ emacs -Q --batch -l magit-section -l ctags-mode.el \
   non-nil.  If parsing fails, still create a `(ctags-root)` section
   with an error message inside it.
 
+- **Inhibit magit-section markers in the mode.**  `ctags-mode` sets
+  `magit-section-inhibit-markers` buffer-locally.  With markers enabled
+  (the default) every insertion relocates the section markers of the
+  whole buffer, making rendering quadratic on large trees (thousands
+  of entries).  Plain positions are sufficient for a read-only stats
+  buffer; the price is that positions are not kept in sync with
+  edits, which is irrelevant here.
+
 - **Don't double-parse.**  `ctags--refresh-buffer` erases the buffer
   and replaces it with the tree.  Calling it twice on the same buffer
   content will cause the second call to parse the tree text as NDJSON
