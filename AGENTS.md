@@ -12,7 +12,7 @@ collapsible 3-level tree (kind → file → entry), derived from
 | File | Purpose |
 |---|---|
 | `ctags-mode.el` | The entire mode (single file, ~450 lines) |
-| `default.nix` | Nix build with `melpaBuild`, patches the `ctags-program` default to the Nix-provided universal-ctags binary |
+| `flake.nix` | Flake with `melpaBuild` package, patches the `ctags-program` default to the Nix-provided universal-ctags binary |
 | `TAGS.json` | Sample NDJSON output for testing (not committed) |
 
 ## Dependencies
@@ -95,7 +95,7 @@ restore the view.
 
 ```bash
 # Nix (local)
-nix-build -E "with import <nixpkgs> {}; (emacs.pkgs.callPackage ./. {})"
+nix build
 
 # Without Nix
 emacs -Q --batch -l magit-section -f batch-byte-compile ctags-mode.el
@@ -151,7 +151,7 @@ emacs -Q --batch -l magit-section -l ctags-mode.el \
   Emacs' `etags` (often installed as `ctags`) doesn't support this flag
   and exits non-zero, producing a clear user-error.
 
-- **`default.nix` patches the default.**  The `postPatch` phase uses
+- **`flake.nix` patches the default.**  The `postPatch` phase uses
   `substituteInPlace` to replace the string literal `"ctags"` with the
   Nix store path to Universal Ctags, so users never need to customize
   `ctags-program`.
