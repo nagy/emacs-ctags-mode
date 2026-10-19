@@ -155,3 +155,8 @@ emacs -Q --batch -l magit-section -l ctags-mode.el \
   `substituteInPlace` to replace the string literal `"ctags"` with the
   Nix store path to Universal Ctags, so users never need to customize
   `ctags-program`.
+
+- **`version` comes from `self.lastModifiedDate`.**  The flake passes
+  `self` into `outputs` and derives `0-unstable-YYYY-MM-DD` from the
+  source tree date.  No manual version bumps.  Falls back to the epoch
+  when the source is not a git checkout.
