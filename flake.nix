@@ -13,12 +13,20 @@
 
   outputs =
     inputs@{
-      self,
       flake-parts,
       nixpkgs,
       treefmt-nix,
       ...
     }:
+    # Date of the last commit as YYYY-MM-DD, folded into the version
+    # string below.  Flake source info gives it as e.g. "20260922133522",
+    # so slice out the year, month and day and glue them with hyphens.
+    let
+      lastModifiedDate = inputs.self.sourceInfo.lastModifiedDate;
+      commitDate = "${builtins.substring 0 4 lastModifiedDate}-${
+        builtins.substring 4 2 lastModifiedDate
+      }-${builtins.substring 6 2 lastModifiedDate}";
+    in
     flake-parts.lib.mkFlake { inherit inputs; } {
       # Emacs packages are pure Elisp: no ELF binaries, so evaluate on
       # every Linux arch (and darwin if the deps exist there).
@@ -47,14 +55,9 @@
             pname = "ctags-mode";
             # Nix rejects versions Nixpkgs cannot parse. Convention for
             # unreleased packages: <upstream-version>-unstable-<YYYY-MM-DD>,
-            # where the date is the last commit touching the source.
-            # Derive the date from the flake self-reference. Fall back to
-            # the epoch when the source is not a git checkout.
-            version =
-              let
-                d = self.lastModifiedDate or "19700101000000";
-              in
-              "0-unstable-${builtins.substring 0 4 d}-${builtins.substring 4 2 d}-${builtins.substring 6 2 d}";
+            # where the date is the last commit touching the source. Derived
+            # from the flake's source info above, so it never goes stale.
+            version = "0.1.0-unstable-${commitDate}";
 
             src = lib.cleanSource ./.;
 
@@ -75,34 +78,6 @@
             # genuinely noisy third-party warnings, never your own code.
             turnCompilationWarningToError = true;
 
-            # The ERT suite covers the parsing and sorting helpers, the
-            # renderer, visiting, refresh and bookmarks.  The
-            # directory-backed tests drive the real Universal Ctags binary
-            # in a throwaway source tree.
-            checkPhase = ''
-              runHook preCheck
-              export HOME=$TMPDIR
-              # `package-initialize' (as elpa2nix does at install time) is
-              # what puts the packageRequires dependencies on `load-path';
-              # a plain batch Emacs cannot see them otherwise.
-              emacs --batch -L . \
-                --eval "(require 'package)" \
-                -f package-initialize \
-                --eval '(setq byte-compile-error-on-warn t)' \
-                -f batch-byte-compile ctags-mode-tests.el
-              emacs --batch -L . \
-                --eval "(require 'package)" \
-                -f package-initialize \
-                -l ctags-mode-tests.elc \
-                -f ert-run-tests-batch-and-exit
-              runHook postCheck
-            '';
-
-            doCheck = true;
-
-            # The directory-backed tests shell out to Universal Ctags.
-            nativeCheckInputs = [ universalCtags ];
-
             meta = {
               description = "Browse Universal Ctags JSON output in a collapsible magit-section tree";
               longDescription = ''
@@ -121,17 +96,42 @@
               license = lib.licenses.agpl3Plus;
               homepage = "https://github.com/nagy/emacs-ctags-mode";
               maintainers = with lib.maintainers; [ nagy ];
-              platforms = lib.platforms.unix;
+              platforms = lib.platforms.linux;
             };
           };
 
           packages.default = config.packages.ctags-mode;
 
           checks = {
-            # melpaBuild byte-compiles with warnings as errors and
-            # `checkPhase' runs the ERT suite, so building the package is
-            # the main check.
-            default = config.packages.ctags-mode;
+            # Run the ERT suite against the *installed* package, not the
+            # checkout.  The suite covers the parsing and sorting helpers,
+            # the renderer, visiting, refresh and bookmarks.  The
+            # directory-backed tests drive the real Universal Ctags binary
+            # in a throwaway source tree.
+            default =
+              pkgs.runCommand "ctags-mode-ert"
+                {
+                  nativeBuildInputs = [
+                    # magit-section comes from the same package set, so a
+                    # plain batch Emacs sees the packageRequires
+                    # dependencies without `package-initialize'.
+                    (pkgs.emacsPackages.emacsWithPackages (p: [ p.magit-section ]))
+                    # The directory-backed tests shell out to ctags.  The
+                    # installed package already bakes in this store path;
+                    # the input keeps the tests honest about the binary.
+                    universalCtags
+                  ];
+                  meta.description = "ctags-mode ERT test suite";
+                }
+                ''
+                  export HOME=$TMPDIR
+                  emacs --batch \
+                    -L ${config.packages.ctags-mode}/share/emacs/site-lisp/elpa/ctags-mode-* \
+                    -l ${config.packages.ctags-mode}/share/emacs/site-lisp/elpa/ctags-mode-*/ctags-mode.el \
+                    -l ${config.packages.ctags-mode.src}/ctags-mode-tests.el \
+                    -f ert-run-tests-batch-and-exit
+                  touch $out
+                '';
 
             # checkdoc + package-lint: catch what byte-compilation cannot.
             lint =
