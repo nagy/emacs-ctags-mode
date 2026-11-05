@@ -355,7 +355,6 @@ not automatically opened in `ctags-mode'."
   (unless (eq major-mode 'ctags-mode)
     (ctags-mode)))
 
-;;;###autoload
 (defun ctags--check-ctags ()
   "Check that `ctags-program' is Universal Ctags.
 Signal an error if it is not."
