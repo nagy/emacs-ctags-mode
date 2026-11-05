@@ -12,12 +12,13 @@ collapsible 3-level tree (kind → file → entry), derived from
 | File | Purpose |
 |---|---|
 | `ctags-mode.el` | The entire mode (single file, ~450 lines) |
-| `flake.nix` | Flake with `melpaBuild` package, patches the `ctags-program` default to the Nix-provided universal-ctags binary |
-| `TAGS.json` | Sample NDJSON output for testing (not committed) |
+| `ctags-mode-tests.el` | ERT suite (unit tests and real-ctags integration tests) |
+| `flake.nix` | Flake with `melpaBuild` package, patches the `ctags-program` default to the Nix-provided universal-ctags binary, runs the ERT suite in `checkPhase` |
+| `TAGS.json` | Sample NDJSON output for manual testing (not committed) |
 
 ## Dependencies
 
-- Emacs ≥ 29.1 (uses `defvar-keymap`)
+- Emacs ≥ 30.1 (uses `defvar-keymap`)
 - `magit-section` (≥ 3.0) — provides the section tree and collapsible UI
 - Universal Ctags on PATH (or set `ctags-program`) — for `ctags-run`
 
@@ -96,6 +97,7 @@ restore the view.
 ```bash
 # Nix (local)
 nix build
+nix flake check   # byte-compile, ERT suite, checkdoc and package-lint
 
 # Without Nix
 emacs -Q --batch -l magit-section -f batch-byte-compile ctags-mode.el
@@ -103,24 +105,33 @@ emacs -Q --batch -l magit-section -f batch-byte-compile ctags-mode.el
 
 ## Testing
 
-The sample `TAGS.json` is a 275 KB NDJSON file with 1346 tags across
-23 kinds, generated from the Yggdrasil Go project.  Open it with
-`find-file` to test the file-backed path, or (if Universal Ctags is
-available) use `M-x ctags-run` on any source directory.
+`ctags-mode-tests.el` holds the ERT suite.  It has three layers:
+
+1. **Unit tests** for the pure helpers: NDJSON parsing, key
+   normalization, grouping and sorting, pattern conversion.
+2. **Buffer tests** for rendering, visiting, refresh, revert and
+   bookmarks.  They build their fixtures with `json-serialize`, so no
+   sample file is needed.
+3. **Integration tests** that run `ctags-run` and `ctags-refresh`
+   against a throwaway source tree, driving the real Universal Ctags
+   binary.  They call `skip-unless` when `ctags-program` is not on
+   `PATH`, so the unit and buffer layers still run without ctags.
 
 ```bash
-# Batch smoke test (file-backed)
-emacs -Q --batch -l magit-section -l ctags-mode.el \
-  --eval '(progn (find-file "./TAGS.json")
-                 (princ (format "%d kinds\n"
-                   (length (oref magit-root-section children)))))'
+# ERT suite (dev shell provides Emacs, magit-section and ctags)
+nix develop --command emacs -Q --batch -L . \
+  -l ctags-mode-tests.el -f ert-run-tests-batch-and-exit
 
-# Batch smoke test (dir-backed, needs universal-ctags)
-emacs -Q --batch -l magit-section -l ctags-mode.el \
-  --eval '(progn (ctags-run "/path/to/source")
-                 (princ (format "%d kinds\n"
-                   (length (oref magit-root-section children)))))'
+# Single test
+nix develop --command emacs -Q --batch -L . \
+  -l ctags-mode-tests.el \
+  --eval '(ert-run-tests-batch-and-exit "ctags-mode-render-tree")'
 ```
+
+For manual testing, generate a `TAGS.json` with
+`ctags -R --output-format=json -f - > TAGS.json` and open it with
+`find-file` (file-backed path) or use `M-x ctags-run` on a source
+directory (directory-backed path).
 
 ## Important patterns
 
@@ -154,7 +165,10 @@ emacs -Q --batch -l magit-section -l ctags-mode.el \
 - **`flake.nix` patches the default.**  The `postPatch` phase uses
   `substituteInPlace` to replace the string literal `"ctags"` with the
   Nix store path to Universal Ctags, so users never need to customize
-  `ctags-program`.
+  `ctags-program`.  The `checkPhase` byte-compiles the tests with
+  warnings as errors, then runs the ERT suite against the patched
+  source with ctags on `PATH`.  `melpaBuild` leaves the test file out
+  of the installed package by default.
 
 - **`version` comes from `self.lastModifiedDate`.**  The flake passes
   `self` into `outputs` and derives `0-unstable-YYYY-MM-DD` from the

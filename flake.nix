@@ -75,6 +75,34 @@
             # genuinely noisy third-party warnings, never your own code.
             turnCompilationWarningToError = true;
 
+            # The ERT suite covers the parsing and sorting helpers, the
+            # renderer, visiting, refresh and bookmarks.  The
+            # directory-backed tests drive the real Universal Ctags binary
+            # in a throwaway source tree.
+            checkPhase = ''
+              runHook preCheck
+              export HOME=$TMPDIR
+              # `package-initialize' (as elpa2nix does at install time) is
+              # what puts the packageRequires dependencies on `load-path';
+              # a plain batch Emacs cannot see them otherwise.
+              emacs --batch -L . \
+                --eval "(require 'package)" \
+                -f package-initialize \
+                --eval '(setq byte-compile-error-on-warn t)' \
+                -f batch-byte-compile ctags-mode-tests.el
+              emacs --batch -L . \
+                --eval "(require 'package)" \
+                -f package-initialize \
+                -l ctags-mode-tests.elc \
+                -f ert-run-tests-batch-and-exit
+              runHook postCheck
+            '';
+
+            doCheck = true;
+
+            # The directory-backed tests shell out to Universal Ctags.
+            nativeCheckInputs = [ universalCtags ];
+
             meta = {
               description = "Browse Universal Ctags JSON output in a collapsible magit-section tree";
               longDescription = ''
@@ -99,6 +127,43 @@
 
           packages.default = config.packages.ctags-mode;
 
+          checks = {
+            # melpaBuild byte-compiles with warnings as errors and
+            # `checkPhase' runs the ERT suite, so building the package is
+            # the main check.
+            default = config.packages.ctags-mode;
+
+            # checkdoc + package-lint: catch what byte-compilation cannot.
+            lint =
+              pkgs.runCommand "ctags-mode-lint"
+                {
+                  nativeBuildInputs = [
+                    (pkgs.emacsPackages.emacsWithPackages (p: [ p.package-lint ]))
+                  ];
+                  # Lint the unpatched sources; the patched copy inside the
+                  # built package differs only in one string literal.
+                  src = config.packages.ctags-mode.src;
+                  meta.description = "checkdoc and package-lint for ctags-mode";
+                }
+                ''
+                  export HOME=$TMPDIR
+                  cp "$src"/ctags-mode.el "$src"/ctags-mode-tests.el .
+                  # package-lint assumes an online ELPA; offline it cannot
+                  # resolve `magit-section', so register a stub package
+                  # description via an advice on `package-initialize' (which
+                  # resets `package-alist' on every call, wiping plain
+                  # pushes).
+                  emacs --batch -l package-lint \
+                    --eval '(advice-add (quote package-initialize) :after (lambda (&rest _) (push (cons (quote magit-section) (list (package-desc-create :name (quote magit-section) :version (quote (4 0 0)) :reqs nil :kind (quote single) :archive "stub" :summary "stub"))) package-alist)))' \
+                    -f package-lint-batch-and-exit ctags-mode.el
+                  # checkdoc always exits zero; gate on its output instead.
+                  lint_log=$(emacs --batch -l checkdoc \
+                    --eval '(progn (checkdoc-file "ctags-mode.el") (checkdoc-file "ctags-mode-tests.el"))' 2>&1)
+                  if [ -n "$lint_log" ]; then printf '%s\n' "$lint_log"; exit 1; fi
+                  touch $out
+                '';
+          };
+
           # `nix fmt` runs nixfmt via treefmt; keep formatting canonical.
           formatter = treefmt-nix.lib.mkWrapper pkgs {
             projectRootFile = "flake.nix";
@@ -107,10 +172,11 @@
 
           devShells.default = pkgs.mkShell {
             # Mirror whatever the package needs at runtime when hacking on
-            # it: the external CLI, a real Emacs for interactive testing.
+            # it: the external CLI, a real Emacs for interactive testing,
+            # with the Elisp dependencies on `load-path'.
             packages = [
               universalCtags
-              pkgs.emacs
+              (pkgs.emacsPackages.emacsWithPackages (p: [ p.magit-section ]))
             ];
           };
         };
