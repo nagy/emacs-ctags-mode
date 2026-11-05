@@ -33,11 +33,11 @@
 ;;; Customization
 
 (defgroup ctags nil
-  "Browse ctags JSON output in a collapsible tree."
+  "Tree browser for ctags JSON output."
   :group 'tools)
 
 (defcustom ctags-show-child-count t
-  "Whether to show the number of children in section headings."
+  "When non-nil, show the number of children in section headings."
   :type 'boolean
   :group 'ctags)
 
@@ -92,6 +92,7 @@ support JSON output.  You need Universal Ctags for this mode."
 ;;; Keymap
 
 (defvar-keymap ctags-mode-map
+  :doc "Keymap for `ctags-mode'."
   :parent magit-section-mode-map
   "RET" #'ctags-visit-entry
   "SPC" #'ctags-visit-entry
@@ -102,13 +103,13 @@ support JSON output.  You need Universal Ctags for this mode."
 ;;; Internals
 
 (defvar-local ctags--source-dir nil
-  "Directory used for resolving relative paths in tags.
+  "Directory for resolving relative paths in tags.
 For file-backed buffers this is the directory of the JSON file.
 For directory-backed buffers this is the directory ctags ran on.")
 
 (defvar-local ctags--tags-dir nil
-  "Directory that ctags was run on, or nil if reading from a JSON file.
-Non-nil for buffers created by `ctags-run'.")
+  "Directory where ctags ran, or nil if the buffer reads a JSON file.
+Non-nil when `ctags-run' creates the buffer.")
 
 (defun ctags--parse-buffer ()
   "Parse the current buffer as newline-delimited JSON (NDJSON).
@@ -195,8 +196,8 @@ ENTRIES is a list of plists."
       (ctags--insert-file-section (car group) (cdr group)))))
 
 (defun ctags--group-by-file (entries)
-  "Group ENTRIES by :path into an alist of (PATH . ENTRIES),
-sorted by path."
+  "Group ENTRIES by :path into an alist of (PATH . ENTRIES).
+Sort the alist by path."
   (let ((groups (make-hash-table :test 'equal)))
     (dolist (entry entries)
       (let* ((path (or (plist-get entry :path) "(unknown)"))
@@ -233,7 +234,7 @@ sorted by path."
                        'font-lock-face 'ctags-entry-scope)))))))
 
 (defun ctags--insert-summary (total-tags total-kinds)
-  "Insert a summary line showing totals."
+  "Insert a summary line with TOTAL-TAGS and TOTAL-KINDS."
   (insert (propertize
            (format "%d tags across %d kinds\n\n"
                    total-tags total-kinds)
@@ -292,7 +293,7 @@ point to the matching section in the new tree."
 (defun ctags--goto-pattern (pattern)
   "Go to PATTERN in the current buffer.
 PATTERN is a ctags pattern like /^func ...$/ or /^  set ARGS...$/.
-Returns non-nil if a match was found."
+Return non-nil if the search finds a match."
   (when (and pattern (stringp pattern))
     (let ((regexp (ctags--pattern-to-regexp pattern)))
       (when regexp
@@ -356,7 +357,8 @@ not automatically opened in `ctags-mode'."
 
 ;;;###autoload
 (defun ctags--check-ctags ()
-  "Check that `ctags-program' is Universal Ctags.  Signal an error if not."
+  "Check that `ctags-program' is Universal Ctags.
+Signal an error if it is not."
   (unless (ctags--ctags-supports-json)
     (user-error
      (concat "%s does not support --output-format=json."
@@ -371,7 +373,7 @@ Creates a buffer named `*ctags: <dir>*' in `ctags-mode'.  The
 buffer is directory-backed: refreshing it re-runs ctags on the
 directory.  You can bookmark this buffer with `\\[bookmark-set]'.
 
-If a buffer for DIR already exists, it is refreshed and reused."
+If a buffer for DIR already exists, refresh and reuse it."
   (interactive
    (list (read-directory-name "Ctags directory: "
                               default-directory nil t)))
@@ -413,9 +415,9 @@ If a buffer for DIR already exists, it is refreshed and reused."
   (ctags-run default-directory))
 
 (defun ctags--revert-buffer (&rest _ignored)
-  "`revert-buffer-function' for ctags-mode buffers.
-Handles both file-backed and directory-backed buffers by delegating
- to `ctags-refresh'."
+  "Re-render the current ctags buffer for `revert-buffer'.
+Handle both file-backed and directory-backed buffers by delegating
+to `ctags-refresh'."
   (ctags-refresh))
 
 (defun ctags--bookmark-make-record ()
