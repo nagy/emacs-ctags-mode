@@ -120,15 +120,33 @@
                     # installed package already bakes in this store path;
                     # the input keeps the tests honest about the binary.
                     universalCtags
+                    # Gives Emacs a writable HOME, so the builder needs no
+                    # `export HOME=$TMPDIR' line and no two checks share a
+                    # home directory.
+                    pkgs.writableTmpDirAsHomeHook
                   ];
                   meta.description = "ctags-mode ERT test suite";
                 }
                 ''
-                  export HOME=$TMPDIR
+                  # runCommand does not stage the source tree, so copy the
+                  # test tree out of the store first.
+                  cp -r ${config.packages.ctags-mode.src}/test ./test
+                  # Glob every test file instead of listing them: a new
+                  # test/<unit>-test.el needs no flake edit.  printf repeats
+                  # "-l %s" per match.  failglob makes an empty glob a shell
+                  # error, so the || guard fires even without `set -e'.
+                  # Restore the default right after: later commands must keep
+                  # default glob semantics.  The unquoted $test_args is
+                  # intentional: the words must split into -l <file> pairs,
+                  # which is safe because test file names never contain
+                  # spaces.
+                  shopt -s failglob
+                  test_args=$(printf -- "-l %s " test/*-test.el) || { echo 'no tests matched test/*-test.el' >&2; exit 1; }
+                  shopt -u failglob
                   emacs --batch \
                     -L ${config.packages.ctags-mode}/share/emacs/site-lisp/elpa/ctags-mode-* \
                     -l ${config.packages.ctags-mode}/share/emacs/site-lisp/elpa/ctags-mode-*/ctags-mode.el \
-                    -l ${config.packages.ctags-mode.src}/ctags-mode-tests.el \
+                    $test_args \
                     -f ert-run-tests-batch-and-exit
                   touch $out
                 '';
@@ -139,26 +157,38 @@
                 {
                   nativeBuildInputs = [
                     (pkgs.emacsPackages.emacsWithPackages (p: [ p.package-lint ]))
+                    # Gives Emacs a writable HOME, so the builder needs no
+                    # `export HOME=$TMPDIR' line and no two checks share a
+                    # home directory.
+                    pkgs.writableTmpDirAsHomeHook
                   ];
                   # Lint the unpatched sources; the patched copy inside the
                   # built package differs only in one string literal.
+                  # test/ is part of the lint surface; `src' may be
+                  # pre-filtered, so copy the tree explicitly instead of
+                  # relying on what melpaBuild staged.
                   src = config.packages.ctags-mode.src;
                   meta.description = "checkdoc and package-lint for ctags-mode";
                 }
                 ''
-                  export HOME=$TMPDIR
-                  cp "$src"/ctags-mode.el "$src"/ctags-mode-tests.el .
+                  cp -r "$src"/. .
                   # package-lint assumes an online ELPA; offline it cannot
                   # resolve `magit-section', so register a stub package
                   # description via an advice on `package-initialize' (which
                   # resets `package-alist' on every call, wiping plain
-                  # pushes).
+                  # pushes).  `package-lint-main-file' stops package-lint
+                  # from treating the test file as its own package and
+                  # complaining about its missing Package-Requires header.
                   emacs --batch -l package-lint \
+                    --eval '(setq package-lint-main-file "ctags-mode.el")' \
                     --eval '(advice-add (quote package-initialize) :after (lambda (&rest _) (push (cons (quote magit-section) (list (package-desc-create :name (quote magit-section) :version (quote (4 0 0)) :reqs nil :kind (quote single) :archive "stub" :summary "stub"))) package-alist)))' \
-                    -f package-lint-batch-and-exit ctags-mode.el
+                    -f package-lint-batch-and-exit \
+                    *.el test/*.el
                   # checkdoc always exits zero; gate on its output instead.
                   lint_log=$(emacs --batch -l checkdoc \
-                    --eval '(progn (checkdoc-file "ctags-mode.el") (checkdoc-file "ctags-mode-tests.el"))' 2>&1)
+                    --eval '(setq checkdoc-arguments-in-order-flag t)' \
+                    --eval '(mapc (lambda (f) (checkdoc-file f)) command-line-args-left)' \
+                    *.el test/*.el 2>&1)
                   if [ -n "$lint_log" ]; then printf '%s\n' "$lint_log"; exit 1; fi
                   touch $out
                 '';

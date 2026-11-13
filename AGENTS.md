@@ -12,7 +12,7 @@ collapsible 3-level tree (kind → file → entry), derived from
 | File | Purpose |
 |---|---|
 | `ctags-mode.el` | The entire mode (single file, ~450 lines) |
-| `ctags-mode-tests.el` | ERT suite (unit tests and real-ctags integration tests) |
+| `test/ctags-mode-test.el` | ERT suite (unit tests and real-ctags integration tests) |
 | `flake.nix` | Flake with `melpaBuild` package, patches the `ctags-program` default to the Nix-provided universal-ctags binary, and runs the ERT suite in `checks.default` against the installed package |
 | `TAGS.json` | Sample NDJSON output for manual testing (not committed) |
 
@@ -105,7 +105,13 @@ emacs -Q --batch -l magit-section -f batch-byte-compile ctags-mode.el
 
 ## Testing
 
-`ctags-mode-tests.el` holds the ERT suite.  It has three layers:
+`test/ctags-mode-test.el` holds the ERT suite.  The layout follows the
+house Emacs convention: a `test/` directory, one `<unit>-test.el` file
+per source file, and shared helpers in `<name>-test-helper.el` (none
+needed yet).  MELPA file specs never descend into subdirectories, so
+the test tree never ships.
+
+The suite has three layers:
 
 1. **Unit tests** for the pure helpers: NDJSON parsing, key
    normalization, grouping and sorting, pattern conversion.
@@ -118,16 +124,17 @@ emacs -Q --batch -l magit-section -f batch-byte-compile ctags-mode.el
    `PATH`, so the unit and buffer layers still run without ctags.
 
 `nix flake check` runs the suite through `checks.default` against the
-installed package.
+installed package.  That check globs `test/*-test.el`, so a new test
+file needs no flake edit.
 
 ```bash
 # ERT suite (dev shell provides Emacs, magit-section and ctags)
-nix develop --command emacs -Q --batch -L . \
-  -l ctags-mode-tests.el -f ert-run-tests-batch-and-exit
+nix develop --command emacs -Q --batch -L . -L test \
+  -l test/ctags-mode-test.el -f ert-run-tests-batch-and-exit
 
 # Single test
-nix develop --command emacs -Q --batch -L . \
-  -l ctags-mode-tests.el \
+nix develop --command emacs -Q --batch -L . -L test \
+  -l test/ctags-mode-test.el \
   --eval '(ert-run-tests-batch-and-exit "ctags-mode-render-tree")'
 ```
 
@@ -168,10 +175,10 @@ directory (directory-backed path).
 - **`flake.nix` patches the default.**  The `postPatch` phase uses
   `substituteInPlace` to replace the string literal `"ctags"` with the
   Nix store path to Universal Ctags, so users never need to customize
-  `ctags-program`.  `checks.default` loads the installed package and
-  runs the ERT suite against it, with ctags on `PATH`.
-  `melpaBuild` leaves the test file out of the installed package by
-  default.
+  `ctags-program`.  `checks.default` loads the installed package,
+  copies `test/` from the store and runs the ERT suite against it, with
+  ctags on `PATH`.  `melpaBuild` leaves the test tree out of the
+  installed package by default.
 
 - **`version` comes from `inputs.self.sourceInfo.lastModifiedDate`.**
   The flake derives `0.1.0-unstable-YYYY-MM-DD` from the source tree

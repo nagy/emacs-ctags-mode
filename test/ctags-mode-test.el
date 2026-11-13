@@ -1,4 +1,4 @@
-;;; ctags-mode-tests.el --- Tests for ctags-mode -*- lexical-binding: t; -*-
+;;; ctags-mode-test.el --- Tests for ctags-mode -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2026  Daniel Nagy
 
@@ -25,7 +25,7 @@
 ;;
 ;; Run the suite with:
 ;;
-;;   Emacs -Q --batch -L . -l ctags-mode-tests.el \
+;;   Emacs -Q --batch -L . -l test/ctags-mode-test.el \
 ;;     -f ert-run-tests-batch-and-exit
 
 ;;; Code:
@@ -37,7 +37,7 @@
 
 ;;; Fixtures
 
-(defconst ctags-mode-tests--entries
+(defconst ctags-mode-test--entries
   '((:name "main"
      :path "src/main.c"
      :kind "function"
@@ -52,56 +52,56 @@
      :pattern "/^struct point {$/"))
   "Three tag entries used by most rendering tests.")
 
-(defun ctags-mode-tests--json (plist)
+(defun ctags-mode-test--json (plist)
   "Return PLIST as one JSON object string."
   (let ((table (make-hash-table :test 'equal)))
     (cl-loop for (key value) on plist by #'cddr
              do (puthash (substring (symbol-name key) 1) value table))
     (json-serialize table)))
 
-(defun ctags-mode-tests--ndjson (entries)
+(defun ctags-mode-test--ndjson (entries)
   "Return ENTRIES as newline-delimited JSON."
-  (mapconcat #'ctags-mode-tests--json entries "\n"))
+  (mapconcat #'ctags-mode-test--json entries "\n"))
 
-(defmacro ctags-mode-tests--with-tags-buffer (entries &rest body)
+(defmacro ctags-mode-test--with-tags-buffer (entries &rest body)
   "Insert tag ENTRIES into a fresh `ctags-mode' buffer, then run BODY."
   (declare (indent 1) (debug (form body)))
-  `(let ((buf (generate-new-buffer " *ctags-mode-tests*")))
+  `(let ((buf (generate-new-buffer " *ctags-mode-test*")))
      (unwind-protect
          (with-current-buffer buf
-           (insert (ctags-mode-tests--ndjson ,entries))
+           (insert (ctags-mode-test--ndjson ,entries))
            (insert "\n")
            (ctags-mode)
            ,@body)
        (kill-buffer buf))))
 
-(defun ctags-mode-tests--walk (fun)
+(defun ctags-mode-test--walk (fun)
   "Call FUN on every section of the current buffer, depth first."
   (when magit-root-section
-    (ctags-mode-tests--walk-section magit-root-section fun)))
+    (ctags-mode-test--walk-section magit-root-section fun)))
 
-(defun ctags-mode-tests--walk-section (section fun)
-  "Call FUN on SECTION and all of its children, depth first."
+(defun ctags-mode-test--walk-section (section fun)
+  "Visit SECTION and its children, calling FUN on each, depth first."
   (funcall fun section)
   (dolist (child (oref section children))
-    (ctags-mode-tests--walk-section child fun)))
+    (ctags-mode-test--walk-section child fun)))
 
-(defun ctags-mode-tests--sections (&optional type)
+(defun ctags-mode-test--sections (&optional type)
   "Return all sections of the current buffer, or those with TYPE."
   (let (result)
-    (ctags-mode-tests--walk
+    (ctags-mode-test--walk
      (lambda (section)
        (when (or (null type) (eq (oref section type) type))
          (push section result))))
     (nreverse result)))
 
-(defun ctags-mode-tests--heading (section)
+(defun ctags-mode-test--heading (section)
   "Return the heading text of SECTION."
   (string-trim-right
    (buffer-substring-no-properties (oref section start)
                                    (oref section content))))
 
-(defmacro ctags-mode-tests--capture-messages (&rest body)
+(defmacro ctags-mode-test--capture-messages (&rest body)
   "Run BODY and return the messages it emits, oldest first."
   (declare (indent 0) (debug (body)))
   `(let (messages)
@@ -111,25 +111,25 @@
        ,@body)
      (nreverse messages)))
 
-(defun ctags-mode-tests--write-file (dir name content)
-  "Write CONTENT to NAME inside DIR and return its absolute file name."
+(defun ctags-mode-test--write-file (dir name content)
+  "In DIR, make file NAME holding CONTENT, then return the absolute name."
   (let ((file (expand-file-name name dir)))
     (make-directory (file-name-directory file) t)
     (with-temp-file file
       (insert content))
     file))
 
-(defmacro ctags-mode-tests--with-source-tree (files &rest body)
+(defmacro ctags-mode-test--with-source-tree (files &rest body)
   "Create a temporary directory holding FILES, then run BODY.
 FILES is an alist of relative name to content.  The directory is bound
 to `dir'."
   (declare (indent 1) (debug (form body)))
   `(let ((dir (file-name-as-directory
-               (make-temp-file "ctags-mode-tests" t))))
+               (make-temp-file "ctags-mode-test" t))))
      (unwind-protect
          (progn
            (dolist (file ,files)
-             (ctags-mode-tests--write-file dir (car file) (cdr file)))
+             (ctags-mode-test--write-file dir (car file) (cdr file)))
            ,@body)
        (dolist (buf (buffer-list))
          (when (string-prefix-p "*ctags" (buffer-name buf))
@@ -141,7 +141,7 @@ to `dir'."
 (ert-deftest ctags-mode-parse-buffer-reads-ndjson ()
   "Parse one object per line and keep the input order."
   (with-temp-buffer
-    (insert (ctags-mode-tests--ndjson ctags-mode-tests--entries))
+    (insert (ctags-mode-test--ndjson ctags-mode-test--entries))
     (let ((tags (ctags--parse-buffer)))
       (should (= (length tags) 3))
       (should (equal (mapcar (lambda (tag) (plist-get tag :name)) tags)
@@ -150,7 +150,7 @@ to `dir'."
 (ert-deftest ctags-mode-parse-buffer-skips-blank-and-invalid-lines ()
   "Skip blank lines and lines that are not JSON objects."
   (with-temp-buffer
-    (insert (ctags-mode-tests--json (car ctags-mode-tests--entries)))
+    (insert (ctags-mode-test--json (car ctags-mode-test--entries)))
     (insert "\n\n")
     (insert "this is not json\n")
     (insert "{}\n")
@@ -159,7 +159,7 @@ to `dir'."
 (ert-deftest ctags-mode-parse-buffer-normalizes-keys ()
   "Map the JSON keys onto the documented plist keys."
   (with-temp-buffer
-    (insert (ctags-mode-tests--json
+    (insert (ctags-mode-test--json
              '(:name "peer" :path "peer.go" :kind "struct"
                :scope "core.link"
                :scopeKind "struct"
@@ -178,7 +178,7 @@ to `dir'."
 
 (ert-deftest ctags-mode-group-by-kind ()
   "Group entries by kind and keep the input order inside a group."
-  (let* ((groups (ctags--group-by-kind ctags-mode-tests--entries))
+  (let* ((groups (ctags--group-by-kind ctags-mode-test--entries))
          (kinds (sort (mapcar #'car groups) #'string<)))
     (should (equal kinds '("function" "struct")))
     (should (equal (mapcar (lambda (tag) (plist-get tag :name))
@@ -237,7 +237,7 @@ to `dir'."
 
 (ert-deftest ctags-mode-group-by-file-sorted ()
   "Group entries by path and sort the groups by path."
-  (let ((groups (ctags--group-by-file ctags-mode-tests--entries)))
+  (let ((groups (ctags--group-by-file ctags-mode-test--entries)))
     (should (equal (mapcar #'car groups) '("src/main.c" "src/math.c")))
     (should (= (length (cdr (assoc "src/math.c" groups))) 2))))
 
@@ -279,7 +279,7 @@ to `dir'."
 
 (ert-deftest ctags-mode-render-tree ()
   "Render the summary, kind, file and entry sections in order."
-  (ctags-mode-tests--with-tags-buffer ctags-mode-tests--entries
+  (ctags-mode-test--with-tags-buffer ctags-mode-test--entries
     (should (equal (buffer-substring-no-properties
                     (point-min)
                     (save-excursion
@@ -287,50 +287,50 @@ to `dir'."
                       (line-end-position)))
                    "3 tags across 2 kinds"))
     (should (equal (mapcar (lambda (section) (oref section type))
-                           (ctags-mode-tests--sections))
+                           (ctags-mode-test--sections))
                    '(ctags-root
                      ctags-kind ctags-file ctags-entry
                      ctags-file ctags-entry
                      ctags-kind ctags-file ctags-entry)))
     (should (equal (mapcar (lambda (section) (oref section value))
-                           (ctags-mode-tests--sections 'ctags-kind))
+                           (ctags-mode-test--sections 'ctags-kind))
                    '("function" "struct")))
     (should (equal (mapcar (lambda (section) (oref section value))
-                           (ctags-mode-tests--sections 'ctags-file))
+                           (ctags-mode-test--sections 'ctags-file))
                    '("src/main.c" "src/math.c" "src/math.c")))
-    (should (= (length (ctags-mode-tests--sections 'ctags-entry)) 3))))
+    (should (= (length (ctags-mode-test--sections 'ctags-entry)) 3))))
 
 (ert-deftest ctags-mode-render-headings ()
   "Kind and file headings carry the child count and the path."
-  (ctags-mode-tests--with-tags-buffer ctags-mode-tests--entries
-    (let* ((kind (car (ctags-mode-tests--sections 'ctags-kind)))
-           (file (car (ctags-mode-tests--sections 'ctags-file))))
-      (should (equal (ctags-mode-tests--heading kind) "Function (2)"))
+  (ctags-mode-test--with-tags-buffer ctags-mode-test--entries
+    (let* ((kind (car (ctags-mode-test--sections 'ctags-kind)))
+           (file (car (ctags-mode-test--sections 'ctags-file))))
+      (should (equal (ctags-mode-test--heading kind) "Function (2)"))
       (should (string-match-p "src/main.c (1)"
-                              (ctags-mode-tests--heading file)))
-      (should (equal (ctags-mode-tests--heading
-                      (car (ctags-mode-tests--sections 'ctags-entry)))
+                              (ctags-mode-test--heading file)))
+      (should (equal (ctags-mode-test--heading
+                      (car (ctags-mode-test--sections 'ctags-entry)))
                      "    main")))))
 
 (ert-deftest ctags-mode-render-hides-child-count ()
   "Honor `ctags-show-child-count' set to nil."
   (let ((ctags-show-child-count nil))
-    (ctags-mode-tests--with-tags-buffer ctags-mode-tests--entries
-      (should (equal (ctags-mode-tests--heading
-                      (car (ctags-mode-tests--sections 'ctags-kind)))
+    (ctags-mode-test--with-tags-buffer ctags-mode-test--entries
+      (should (equal (ctags-mode-test--heading
+                      (car (ctags-mode-test--sections 'ctags-kind)))
                      "Function")))))
 
 (ert-deftest ctags-mode-render-empty-buffer ()
   "Render a placeholder when the buffer holds no tags."
-  (ctags-mode-tests--with-tags-buffer nil
+  (ctags-mode-test--with-tags-buffer nil
     (should (string-match-p "(no tags found)"
                             (buffer-substring-no-properties
                              (point-min) (point-max))))
-    (should (null (ctags-mode-tests--sections 'ctags-kind)))))
+    (should (null (ctags-mode-test--sections 'ctags-kind)))))
 
 (ert-deftest ctags-mode-render-keeps-root-section ()
   "Always create a root section, so `magit-root-section' stays non-nil."
-  (ctags-mode-tests--with-tags-buffer nil
+  (ctags-mode-test--with-tags-buffer nil
     (should (oref magit-root-section type))
     (should (eq (oref magit-root-section type) 'ctags-root))))
 
@@ -338,19 +338,19 @@ to `dir'."
   "Sort kinds and entries as the customization says."
   (let ((ctags-default-kind-sort 'name)
         (ctags-entry-sort 'path))
-    (ctags-mode-tests--with-tags-buffer ctags-mode-tests--entries
+    (ctags-mode-test--with-tags-buffer ctags-mode-test--entries
       (should (equal (mapcar (lambda (section) (oref section value))
-                             (ctags-mode-tests--sections 'ctags-kind))
+                             (ctags-mode-test--sections 'ctags-kind))
                      '("function" "struct")))
       ;; Both functions share the kind section; path order is used.
       (should (equal (mapcar (lambda (section)
                                (plist-get (oref section value) :name))
-                             (ctags-mode-tests--sections 'ctags-entry))
+                             (ctags-mode-test--sections 'ctags-entry))
                      '("main" "add" "point"))))))
 
 (ert-deftest ctags-mode-render-properties ()
   "Inhibit section markers, so large trees stay linear to render."
-  (ctags-mode-tests--with-tags-buffer ctags-mode-tests--entries
+  (ctags-mode-test--with-tags-buffer ctags-mode-test--entries
     (should magit-section-inhibit-markers)
     (should (eq major-mode 'ctags-mode))
     (should buffer-read-only)))
@@ -359,18 +359,18 @@ to `dir'."
 
 (ert-deftest ctags-mode-visit-entry ()
   "Visit the source location of the entry at point."
-  (ctags-mode-tests--with-source-tree
+  (ctags-mode-test--with-source-tree
       '(("math.c" . "int sub(int a, int b) { return a - b; }\n\
 int add(int a, int b) { return a + b; }\n"))
     (let ((buf (generate-new-buffer " *ctags-mode-visit*")))
       (unwind-protect
           (with-current-buffer buf
-            (insert (ctags-mode-tests--ndjson
+            (insert (ctags-mode-test--ndjson
                      (list '(:name "add" :path "math.c" :kind "function"
                              :pattern "/^int add(int a, int b) {$/"))))
             (setq default-directory dir)
             (ctags-mode)
-            (goto-char (oref (car (ctags-mode-tests--sections 'ctags-entry))
+            (goto-char (oref (car (ctags-mode-test--sections 'ctags-entry))
                              start))
             (ctags-visit-entry)
             (with-current-buffer (window-buffer)
@@ -388,74 +388,74 @@ int add(int a, int b) { return a + b; }\n"))
 
 (ert-deftest ctags-mode-visit-entry-missing-file ()
   "Report a missing file instead of opening a wrong buffer."
-  (ctags-mode-tests--with-tags-buffer
+  (ctags-mode-test--with-tags-buffer
       (list '(:name "gone" :path "gone.c" :kind "function"))
-    (goto-char (oref (car (ctags-mode-tests--sections 'ctags-entry)) start))
+    (goto-char (oref (car (ctags-mode-test--sections 'ctags-entry)) start))
     (should (string-match-p "File not found"
-                            (car (ctags-mode-tests--capture-messages
+                            (car (ctags-mode-test--capture-messages
                                      (ctags-visit-entry)))))))
 
 (ert-deftest ctags-mode-visit-entry-outside-entry ()
   "Report when point is not on a tag entry."
-  (ctags-mode-tests--with-tags-buffer ctags-mode-tests--entries
+  (ctags-mode-test--with-tags-buffer ctags-mode-test--entries
     (goto-char (point-min))
     (should (string-match-p "No tag at point"
-                            (car (ctags-mode-tests--capture-messages
+                            (car (ctags-mode-test--capture-messages
                                      (ctags-visit-entry)))))))
 
 ;;; File-backed buffers
 
 (ert-deftest ctags-mode-activates-for-tags-json ()
   "Open a file named TAGS.json in `ctags-mode'."
-  (ctags-mode-tests--with-source-tree
+  (ctags-mode-test--with-source-tree
       '(("TAGS.json" . ""))
     (let ((file (expand-file-name "TAGS.json" dir)))
       (with-temp-file file
-        (insert (ctags-mode-tests--ndjson ctags-mode-tests--entries)))
+        (insert (ctags-mode-test--ndjson ctags-mode-test--entries)))
       (let ((buf (find-file-noselect file)))
         (unwind-protect
             (with-current-buffer buf
               (should (eq major-mode 'ctags-mode))
               (should (equal ctags--source-dir dir))
               (should-not ctags--tags-dir)
-              (should (= (length (ctags-mode-tests--sections 'ctags-entry))
+              (should (= (length (ctags-mode-test--sections 'ctags-entry))
                          3)))
           (kill-buffer buf))))))
 
 (ert-deftest ctags-mode-open-any-file ()
   "Open a JSON file with another name through `ctags-open'."
-  (ctags-mode-tests--with-source-tree
+  (ctags-mode-test--with-source-tree
       '(("tags.json" . ""))
     (let ((file (expand-file-name "tags.json" dir)))
       (with-temp-file file
-        (insert (ctags-mode-tests--json (car ctags-mode-tests--entries))))
+        (insert (ctags-mode-test--json (car ctags-mode-test--entries))))
       (let ((buf (find-file-noselect file)))
         (unwind-protect
             (with-current-buffer buf
               (should-not (eq major-mode 'ctags-mode))
               (ctags-open file)
               (should (eq major-mode 'ctags-mode))
-              (should (= (length (ctags-mode-tests--sections
+              (should (= (length (ctags-mode-test--sections
                                   'ctags-entry))
                          1)))
           (kill-buffer buf))))))
 
 (ert-deftest ctags-mode-refresh-file-backed ()
   "Re-read the JSON file and re-render the tree on refresh."
-  (ctags-mode-tests--with-source-tree
+  (ctags-mode-test--with-source-tree
       '(("TAGS.json" . ""))
     (let ((file (expand-file-name "TAGS.json" dir)))
       (with-temp-file file
-        (insert (ctags-mode-tests--json (car ctags-mode-tests--entries))))
+        (insert (ctags-mode-test--json (car ctags-mode-test--entries))))
       (let ((buf (find-file-noselect file)))
         (unwind-protect
             (with-current-buffer buf
-              (should (= (length (ctags-mode-tests--sections 'ctags-entry))
+              (should (= (length (ctags-mode-test--sections 'ctags-entry))
                          1))
               (with-temp-file file
-                (insert (ctags-mode-tests--ndjson ctags-mode-tests--entries)))
+                (insert (ctags-mode-test--ndjson ctags-mode-test--entries)))
               (ctags-refresh)
-              (should (= (length (ctags-mode-tests--sections 'ctags-entry))
+              (should (= (length (ctags-mode-test--sections 'ctags-entry))
                          3))
               (should (string-match-p "3 tags across 2 kinds"
                                       (buffer-string))))
@@ -463,16 +463,16 @@ int add(int a, int b) { return a + b; }\n"))
 
 (ert-deftest ctags-mode-revert-buffer ()
   "Revert a file-backed buffer without parsing the rendered tree."
-  (ctags-mode-tests--with-source-tree
+  (ctags-mode-test--with-source-tree
       '(("TAGS.json" . ""))
     (let ((file (expand-file-name "TAGS.json" dir)))
       (with-temp-file file
-        (insert (ctags-mode-tests--json (car ctags-mode-tests--entries))))
+        (insert (ctags-mode-test--json (car ctags-mode-test--entries))))
       (let ((buf (find-file-noselect file)))
         (unwind-protect
             (with-current-buffer buf
               (revert-buffer nil t t)
-              (should (= (length (ctags-mode-tests--sections 'ctags-entry))
+              (should (= (length (ctags-mode-test--sections 'ctags-entry))
                          1))
               (should (eq revert-buffer-function #'ctags--revert-buffer)))
           (kill-buffer buf))))))
@@ -481,7 +481,7 @@ int add(int a, int b) { return a + b; }\n"))
   "Report that there is nothing to refresh in other buffers."
   (with-temp-buffer
     (should (string-match-p "nothing to refresh"
-                            (car (ctags-mode-tests--capture-messages
+                            (car (ctags-mode-test--capture-messages
                                      (ctags-refresh)))))))
 
 ;;; Ctags binary validation
@@ -510,7 +510,7 @@ int add(int a, int b) { return a + b; }\n"))
 (ert-deftest ctags-mode-run-renders-directory ()
   "Run ctags on a directory and render the tags it reports."
   (skip-unless (executable-find ctags-program))
-  (ctags-mode-tests--with-source-tree
+  (ctags-mode-test--with-source-tree
       '(("math.c" . "int add(int a, int b) { return a + b; }\n\
 struct point { int x; int y; };\n"))
     (ctags-run dir)
@@ -521,7 +521,7 @@ struct point { int x; int y; };\n"))
             (should (equal ctags--tags-dir dir))
             (should (equal ctags--source-dir dir))
             (should (string-prefix-p "*ctags: " (buffer-name)))
-            (should (>= (length (ctags-mode-tests--sections 'ctags-kind)) 2))
+            (should (>= (length (ctags-mode-test--sections 'ctags-kind)) 2))
             (should (string-match-p "add" (buffer-string)))
             (should (functionp bookmark-make-record-function)))
         (kill-buffer buf)))))
@@ -529,37 +529,37 @@ struct point { int x; int y; };\n"))
 (ert-deftest ctags-mode-run-reuses-buffer ()
   "Repeated `ctags-run' calls reuse the existing buffer."
   (skip-unless (executable-find ctags-program))
-  (ctags-mode-tests--with-source-tree
+  (ctags-mode-test--with-source-tree
       '(("math.c" . "int add(int a, int b) { return a + b; }\n"))
     (let ((first (progn (ctags-run dir) (current-buffer))))
       (unwind-protect
           (let ((second (progn (ctags-run dir) (current-buffer))))
             (should (eq first second))
             (with-current-buffer second
-              (should (= (length (ctags-mode-tests--sections 'ctags-entry))
+              (should (= (length (ctags-mode-test--sections 'ctags-entry))
                          1))))
         (kill-buffer first)))))
 
 (ert-deftest ctags-mode-refresh-directory-backed ()
   "Refresh a directory-backed buffer by re-running ctags."
   (skip-unless (executable-find ctags-program))
-  (ctags-mode-tests--with-source-tree
+  (ctags-mode-test--with-source-tree
       '(("math.c" . "int add(int a, int b) { return a + b; }\n"))
     (ctags-run dir)
     (let ((buf (current-buffer)))
       (unwind-protect
           (with-current-buffer buf
-            (should (= (length (ctags-mode-tests--sections 'ctags-entry)) 1))
-            (ctags-mode-tests--write-file
+            (should (= (length (ctags-mode-test--sections 'ctags-entry)) 1))
+            (ctags-mode-test--write-file
              dir "more.c" "int sub(int a, int b) { return a - b; }\n")
             (ctags-refresh)
-            (should (= (length (ctags-mode-tests--sections 'ctags-entry)) 2)))
+            (should (= (length (ctags-mode-test--sections 'ctags-entry)) 2)))
         (kill-buffer buf)))))
 
 (ert-deftest ctags-mode-bookmark-record ()
   "Build a bookmark record that carries the directory."
   (skip-unless (executable-find ctags-program))
-  (ctags-mode-tests--with-source-tree
+  (ctags-mode-test--with-source-tree
       '(("math.c" . "int add(int a, int b) { return a + b; }\n"))
     (ctags-run dir)
     (let ((buf (current-buffer)))
@@ -575,7 +575,7 @@ struct point { int x; int y; };\n"))
 (ert-deftest ctags-mode-bookmark-handler ()
   "Restore a directory-backed buffer from a bookmark record."
   (skip-unless (executable-find ctags-program))
-  (ctags-mode-tests--with-source-tree
+  (ctags-mode-test--with-source-tree
       '(("math.c" . "int add(int a, int b) { return a + b; }\n"))
     (ctags-run dir)
     (let ((record (ctags--bookmark-make-record))
@@ -588,9 +588,9 @@ struct point { int x; int y; };\n"))
             (should (equal (buffer-name (current-buffer)) name))
             (with-current-buffer (current-buffer)
               (should (equal ctags--tags-dir dir))
-              (should (= (length (ctags-mode-tests--sections 'ctags-entry))
+              (should (= (length (ctags-mode-test--sections 'ctags-entry))
                          1))))
         (kill-buffer name)))))
 
-(provide 'ctags-mode-tests)
-;;; ctags-mode-tests.el ends here
+(provide 'ctags-mode-test)
+;;; ctags-mode-test.el ends here
