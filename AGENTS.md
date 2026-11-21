@@ -17,7 +17,7 @@ Presents tags in a collapsible three-level tree (kind, file, entry) derived from
 
 ## Build and test
 
-- `nix flake check` — byte-compile, ERT suite, checkdoc, package-lint.
+- `nix flake check` — the gate. Run before done.
 - `nix build` — the package.
 - `nix develop --command emacs -Q --batch -L . -L test -l
   test/ctags-mode-test.el -f ert-run-tests-batch-and-exit` — ERT suite in the
