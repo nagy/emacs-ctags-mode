@@ -53,6 +53,7 @@
         {
           packages.ctags-mode = melpaBuild {
             pname = "ctags-mode";
+            preferLocalBuild = true;
             # Nix rejects versions Nixpkgs cannot parse. Convention for
             # unreleased packages: <upstream-version>-unstable-<YYYY-MM-DD>,
             # where the date is the last commit touching the source. Derived
