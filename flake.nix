@@ -109,7 +109,7 @@
             # directory-backed tests drive the real Universal Ctags binary
             # in a throwaway source tree.
             default =
-              pkgs.runCommand "ctags-mode-ert"
+              pkgs.runCommandLocal "ctags-mode-ert"
                 {
                   nativeBuildInputs = [
                     # magit-section comes from the same package set, so a
@@ -128,7 +128,7 @@
                   meta.description = "ctags-mode ERT test suite";
                 }
                 ''
-                  # runCommand does not stage the source tree, so copy the
+                  # runCommandLocal does not stage the source tree, so copy the
                   # test tree out of the store first.
                   cp -r ${config.packages.ctags-mode.src}/test ./test
                   # Glob every test file instead of listing them: a new
@@ -153,7 +153,7 @@
 
             # checkdoc + package-lint: catch what byte-compilation cannot.
             lint =
-              pkgs.runCommand "ctags-mode-lint"
+              pkgs.runCommandLocal "ctags-mode-lint"
                 {
                   nativeBuildInputs = [
                     (pkgs.emacsPackages.emacsWithPackages (p: [ p.package-lint ]))
