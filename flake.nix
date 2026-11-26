@@ -22,12 +22,18 @@
     # string below.  Flake source info gives it as e.g. "20260922133522",
     # so slice out the year, month and day and glue them with hyphens.
     let
-      lastModifiedDate = inputs.self.sourceInfo.lastModifiedDate;
+      sourceInfo = inputs.self.sourceInfo or { };
+      lastModifiedDate = sourceInfo.lastModifiedDate or "19700101000000";
       commitDate = "${builtins.substring 0 4 lastModifiedDate}-${
         builtins.substring 4 2 lastModifiedDate
       }-${builtins.substring 6 2 lastModifiedDate}";
+      version = "0.1.0-unstable-${commitDate}";
     in
     flake-parts.lib.mkFlake { inherit inputs; } {
+      # `nix fmt' runs nixfmt via treefmt, and the module adds the
+      # `checks.treefmt' gate that fails on an unformatted file.
+      imports = [ treefmt-nix.flakeModule ];
+
       # Emacs packages are pure Elisp: no ELF binaries, so evaluate on
       # every Linux arch (and darwin if the deps exist there).
       systems = [
@@ -44,63 +50,74 @@
           ...
         }:
         let
-          inherit (pkgs.emacsPackages) melpaBuild;
           # The package shells out to Universal Ctags at runtime
           # (`ctags-run`); bake its store path in so the installed
           # package works without anything on $PATH.
           universalCtags = pkgs.universal-ctags;
+
+          # Overridable, so a consumer can swap the Emacs or the package
+          # set: inputs.emacs-ctags-mode.packages.${system}.ctags-mode.override
+          # { emacs = pkgs.emacs-nox; }
+          ctags-mode = lib.makeOverridable (
+            {
+              # `melpaBuild' closes over the Emacs of its package set, so an
+              # `emacs' argument on the build does nothing. Build the set
+              # against the chosen Emacs instead.
+              emacs ? pkgs.emacs,
+              emacsPackages ? emacs.pkgs,
+              melpaBuild ? emacsPackages.melpaBuild,
+              # The flake passes this, so a plain import stays explicit.
+              version,
+            }:
+            melpaBuild {
+              pname = "ctags-mode";
+              preferLocalBuild = true;
+              inherit version;
+
+              src = lib.cleanSource ./.;
+
+              # Elisp dependencies from the Package-Requires header that
+              # already exist in nixpkgs.
+              packageRequires = with emacsPackages; [ magit-section ];
+
+              # Rewrite the default executable path to the Nix store path.
+              # Interpolating the derivation bakes the store path in;
+              # `lib.getExe'` picks the exact binary name inside the package.
+              postPatch = ''
+                substituteInPlace ctags-mode.el \
+                  --replace-fail 'ctags-program "ctags"' 'ctags-program "${lib.getExe' universalCtags "ctags"}"'
+              '';
+
+              # Byte-compilation warnings fail the build. Keep it on: it is
+              # the cheapest lint the package will ever get. Silence only
+              # genuinely noisy third-party warnings, never your own code.
+              turnCompilationWarningToError = true;
+
+              meta = {
+                description = "Browse Universal Ctags JSON output in a collapsible magit-section tree";
+                longDescription = ''
+                  ctags-mode is a major mode for browsing the JSON output of
+                  Universal Ctags.  Tags are grouped by kind (func, struct,
+                  variable, …) in a collapsible 3-level tree (kind → file →
+                  entry) built on magit-section.
+
+                  Both file-backed buffers (opening a generated TAGS.json)
+                  and directory-backed buffers (running ctags on a source
+                  tree with M-x ctags-run) are supported; the latter can be
+                  bookmarked and refreshed by re-running ctags.
+                '';
+                # Read the license from the file header — Elisp packages
+                # conventionally declare it after ";;; Code:".
+                license = lib.licenses.agpl3Plus;
+                homepage = "https://github.com/nagy/emacs-ctags-mode";
+                maintainers = with lib.maintainers; [ nagy ];
+                platforms = lib.platforms.linux;
+              };
+            }
+          ) { inherit version; };
         in
         {
-          packages.ctags-mode = melpaBuild {
-            pname = "ctags-mode";
-            preferLocalBuild = true;
-            # Nix rejects versions Nixpkgs cannot parse. Convention for
-            # unreleased packages: <upstream-version>-unstable-<YYYY-MM-DD>,
-            # where the date is the last commit touching the source. Derived
-            # from the flake's source info above, so it never goes stale.
-            version = "0.1.0-unstable-${commitDate}";
-
-            src = lib.cleanSource ./.;
-
-            # Elisp dependencies from the Package-Requires header that
-            # already exist in nixpkgs.
-            packageRequires = with pkgs.emacsPackages; [ magit-section ];
-
-            # Rewrite the default executable path to the Nix store path.
-            # Interpolating the derivation bakes the store path in;
-            # `lib.getExe'` picks the exact binary name inside the package.
-            postPatch = ''
-              substituteInPlace ctags-mode.el \
-                --replace-fail 'ctags-program "ctags"' 'ctags-program "${lib.getExe' universalCtags "ctags"}"'
-            '';
-
-            # Byte-compilation warnings fail the build. Keep it on: it is
-            # the cheapest lint the package will ever get. Silence only
-            # genuinely noisy third-party warnings, never your own code.
-            turnCompilationWarningToError = true;
-
-            meta = {
-              description = "Browse Universal Ctags JSON output in a collapsible magit-section tree";
-              longDescription = ''
-                ctags-mode is a major mode for browsing the JSON output of
-                Universal Ctags.  Tags are grouped by kind (func, struct,
-                variable, …) in a collapsible 3-level tree (kind → file →
-                entry) built on magit-section.
-
-                Both file-backed buffers (opening a generated TAGS.json)
-                and directory-backed buffers (running ctags on a source
-                tree with M-x ctags-run) are supported; the latter can be
-                bookmarked and refreshed by re-running ctags.
-              '';
-              # Read the license from the file header — Elisp packages
-              # conventionally declare it after ";;; Code:".
-              license = lib.licenses.agpl3Plus;
-              homepage = "https://github.com/nagy/emacs-ctags-mode";
-              maintainers = with lib.maintainers; [ nagy ];
-              platforms = lib.platforms.linux;
-            };
-          };
-
+          packages.ctags-mode = ctags-mode;
           packages.default = config.packages.ctags-mode;
 
           checks = {
@@ -195,8 +212,9 @@
                 '';
           };
 
-          # `nix fmt` runs nixfmt via treefmt; keep formatting canonical.
-          formatter = treefmt-nix.lib.mkWrapper pkgs {
+          # treefmt-nix has no Elisp formatter, so this formats the flake
+          # itself; keep formatting canonical.
+          treefmt = {
             projectRootFile = "flake.nix";
             programs.nixfmt.enable = true;
           };
